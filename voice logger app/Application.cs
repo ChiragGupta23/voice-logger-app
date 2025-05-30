@@ -1795,7 +1795,8 @@ namespace application_space
                     while (status == 0) { Program.delay_ms(100, 0); }
                     while (configured == true)
                     {
-                        Program.delay_ms(5, 0);
+                        //Earlier instead of 1ms delay it was 5ms delay. It was made to 1ms for faster FIFO read.
+                        Program.delay_ms(1, 0);
                         for (int j = 0; j < no_of_channel; j++)
                         {
                             //q loop is set to 40 times, now it will read the fifo 40 times in a single loop, earlier it was 20
@@ -2930,12 +2931,14 @@ namespace application_space
             {
                 uint h = 0, k = 0, j = 0;
                 byte flag = 0;
-                int[] v = array.Select((b, i) => (b == 0xFF) && (i < last_element) ? i : -1).Where(i => i != -1).ToArray();
+
+                int[] v = array.Select((b, i) => (b == 0xFF) && (i < last_element) ? i : -1)
+                               .Where(i => i != -1).ToArray();
 
                 if (pre_offset == 0)
                 {
                     for (uint p = 0; p < no_of_channel; p++)
-                    { 
+                    {
                         if (channel[p].pre_channel == 1)
                         {
                             channel[p].pre_channel = 0;
@@ -2957,19 +2960,21 @@ namespace application_space
                 {
                     if ((v[0] > 0) && (flag == 1))
                     {
-                        //try catch to catch the out of memory exception
                         try
                         {
                             for (k = pre_offset; k < v[0]; k++, h++)
                             {
-                                channel[h % (no_of_channel)].ch_Fifo.WriteByte(array[k]);
+                                channel[h % no_of_channel].ch_Fifo.WriteByte(array[k]);
                             }
                         }
-                        catch (Exception ex)
+                        catch (OutOfMemoryException ex)
                         {
-                            LogFile.WriteToLogFile(ex.Message + "put_logger_fifo_in_channel_fifo (Line 2962)\n", AppDomain.CurrentDomain.BaseDirectory, "Exception.txt");
+                            LogFile.WriteToLogFile("OutOfMemoryException: " + ex.Message + " in initial write block\n", AppDomain.CurrentDomain.BaseDirectory, "Exception.txt");
+                            GC.Collect();
+                            return;
                         }
                     }
+
                     h = 0;
 
                     for (j = 0; j < v.Length - 1; j++)
@@ -2977,18 +2982,19 @@ namespace application_space
                         Array.Copy(array, v[j], infobytes, 0, 8);
                         fetch_digital_data();
                         Array.Clear(infobytes, 0, 8);
-                        
-                        //try catch to catch the out of memory exception
+
                         try
                         {
                             for (k = 0; k < ((v[j + 1] - v[j]) - 8); k++, h++)
                             {
-                                channel[h % (no_of_channel)].ch_Fifo.WriteByte(array[(v[j] + 8) + k]);
+                                channel[h % no_of_channel].ch_Fifo.WriteByte(array[(v[j] + 8) + k]);
                             }
                         }
-                        catch (Exception ex)
+                        catch (OutOfMemoryException ex)
                         {
-                            LogFile.WriteToLogFile(ex.Message + "put_logger_fifo_in_channel_fifo (Line 2974)\n", AppDomain.CurrentDomain.BaseDirectory, "Exception.txt");
+                            LogFile.WriteToLogFile("OutOfMemoryException: " + ex.Message + " in middle write block\n", AppDomain.CurrentDomain.BaseDirectory, "Exception.txt");
+                            GC.Collect();
+                            return;
                         }
                     }
 
@@ -2997,24 +3003,132 @@ namespace application_space
                         Array.Copy(array, v[j], infobytes, 0, 8);
                         fetch_digital_data();
                         Array.Clear(infobytes, 0, 8);
-                        for (k = 0; k <= ((last_element - v[v.Length - 1]) - 8); k++, h++)
+
+                        try
                         {
-                            channel[h % (no_of_channel)].ch_Fifo.WriteByte(array[(v[j] + 8) + k]);
+                            for (k = 0; k <= ((last_element - v[v.Length - 1]) - 8); k++, h++)
+                            {
+                                channel[h % no_of_channel].ch_Fifo.WriteByte(array[(v[j] + 8) + k]);
+                            }
+                            pre_offset = 0;
                         }
-                        pre_offset = 0;
+                        catch (OutOfMemoryException ex)
+                        {
+                            LogFile.WriteToLogFile("OutOfMemoryException: " + ex.Message + " in final write block\n", AppDomain.CurrentDomain.BaseDirectory, "Exception.txt");
+                            GC.Collect();
+                            return;
+                        }
                     }
                     else
                     {
                         pre_offset = (uint)(8 - ((last_element - v[v.Length - 1]) + 1));
                         Array.Copy(array, v[j], infobytes, 0, ((last_element - v[v.Length - 1]) + 1));
                     }
-                    channel[(h) % (no_of_channel)].pre_channel = 1;
+
+                    channel[h % no_of_channel].pre_channel = 1;
                 }
             }
             catch (Exception ex)
             {
-                LogFile.WriteToLogFile(ex.Message + "put_logger_fifo_in_channel_fifo\n", AppDomain.CurrentDomain.BaseDirectory, "Exception.txt");
+                LogFile.WriteToLogFile("Exception: " + ex.Message + " in put_logger_fifo_in_channel_fifo\n", AppDomain.CurrentDomain.BaseDirectory, "Exception.txt");
             }
-        }       
+        }
+
+
+
+
+
+        //public void put_logger_fifo_in_channel_fifo(uint last_element)
+        //{
+        //    try
+        //    {
+        //        uint h = 0, k = 0, j = 0;
+        //        byte flag = 0;
+        //        int[] v = array.Select((b, i) => (b == 0xFF) && (i < last_element) ? i : -1).Where(i => i != -1).ToArray();
+
+        //        if (pre_offset == 0)
+        //        {
+        //            for (uint p = 0; p < no_of_channel; p++)
+        //            { 
+        //                if (channel[p].pre_channel == 1)
+        //                {
+        //                    channel[p].pre_channel = 0;
+        //                    h = p;
+        //                    flag = 1;
+        //                }
+        //                channel[p].pre_channel = 0;
+        //            }
+        //        }
+        //        else
+        //        {
+        //            Array.Copy(array, 0, infobytes, 8 - pre_offset, pre_offset);
+        //            fetch_digital_data();
+        //            Array.Clear(infobytes, 0, 8);
+        //            h = 0;
+        //        }
+
+        //        if (v.Length > 0)
+        //        {
+        //            if ((v[0] > 0) && (flag == 1))
+        //            {
+        //                //try catch to catch the out of memory exception
+        //                try
+        //                {
+        //                    for (k = pre_offset; k < v[0]; k++, h++)
+        //                    {
+        //                        channel[h % (no_of_channel)].ch_Fifo.WriteByte(array[k]);
+        //                    }
+        //                }
+        //                catch (Exception ex)
+        //                {
+        //                    LogFile.WriteToLogFile(ex.Message + "put_logger_fifo_in_channel_fifo (Line 2962)\n", AppDomain.CurrentDomain.BaseDirectory, "Exception.txt");
+        //                }
+        //            }
+        //            h = 0;
+
+        //            for (j = 0; j < v.Length - 1; j++)
+        //            {
+        //                Array.Copy(array, v[j], infobytes, 0, 8);
+        //                fetch_digital_data();
+        //                Array.Clear(infobytes, 0, 8);
+
+        //                //try catch to catch the out of memory exception
+        //                try
+        //                {
+        //                    for (k = 0; k < ((v[j + 1] - v[j]) - 8); k++, h++)
+        //                    {
+        //                        channel[h % (no_of_channel)].ch_Fifo.WriteByte(array[(v[j] + 8) + k]);
+        //                    }
+        //                }
+        //                catch (Exception ex)
+        //                {
+        //                    LogFile.WriteToLogFile(ex.Message + "put_logger_fifo_in_channel_fifo (Line 2974)\n", AppDomain.CurrentDomain.BaseDirectory, "Exception.txt");
+        //                }
+        //            }
+
+        //            if ((last_element - v[v.Length - 1]) > 8)
+        //            {
+        //                Array.Copy(array, v[j], infobytes, 0, 8);
+        //                fetch_digital_data();
+        //                Array.Clear(infobytes, 0, 8);
+        //                for (k = 0; k <= ((last_element - v[v.Length - 1]) - 8); k++, h++)
+        //                {
+        //                    channel[h % (no_of_channel)].ch_Fifo.WriteByte(array[(v[j] + 8) + k]);
+        //                }
+        //                pre_offset = 0;
+        //            }
+        //            else
+        //            {
+        //                pre_offset = (uint)(8 - ((last_element - v[v.Length - 1]) + 1));
+        //                Array.Copy(array, v[j], infobytes, 0, ((last_element - v[v.Length - 1]) + 1));
+        //            }
+        //            channel[(h) % (no_of_channel)].pre_channel = 1;
+        //        }
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        LogFile.WriteToLogFile(ex.Message + "put_logger_fifo_in_channel_fifo\n", AppDomain.CurrentDomain.BaseDirectory, "Exception.txt");
+        //    }
+        //}       
     }
 }
